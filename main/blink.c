@@ -13,6 +13,7 @@
 #include "driver/spi_master.h"
 #include "sdkconfig.h"
 #include "fonts.h"
+#include "math.h"
 
 #include "ssd1306.h"
 
@@ -36,6 +37,7 @@
 uint8_t cntr = 0;
 spi_device_handle_t spi;
 uint8_t max31865_data[16];
+char buf[64];
 
 static void i2c_example_master_init()
 {
@@ -80,7 +82,7 @@ static void spi_master_init() {
 	printf("spi_bus_add_device: %d\r\n", ret);
 }
 
-uint32_t max31865_readCFG() {
+uint32_t max31865_read() {
 	// == SET UP STUFF ===
 	esp_err_t _result;
 	spi_transaction_t _spi_transaction1;
@@ -110,6 +112,38 @@ uint32_t max31865_readCFG() {
 
 	return *(uint32_t*)_spi_transaction2.rx_data;
 }
+
+uint32_t max31865_readRTD() {
+	// == SET UP STUFF ===
+	esp_err_t _result;
+	spi_transaction_t _spi_transaction1;
+	spi_transaction_t _spi_transaction2;
+	memset(&_spi_transaction1, 0, sizeof(_spi_transaction1));		// init with zeros
+	memset(&_spi_transaction2, 0, sizeof(_spi_transaction2));		// init with zeros
+
+	// === TRANSMIT ===
+	_spi_transaction1.length = 		8 * 1;                     		// len is in BITS
+	_spi_transaction1.flags = 		SPI_TRANS_USE_TXDATA;			// use internal 4 byte buf
+	_spi_transaction1.tx_data[0] = 	0x01;							// start at address 0x00
+
+	_result = spi_device_transmit(spi, &_spi_transaction1);  		// Transmit!
+	assert( _result == ESP_OK );            						// Should have had no issues.
+
+	// === RECEIVE ===
+	_spi_transaction2.length = 		8 * 2;								// number of bytes that we intent to receive
+	_spi_transaction2.flags = SPI_TRANS_USE_RXDATA;
+
+	_result = spi_device_transmit(spi, &_spi_transaction2);
+	assert( _result == ESP_OK );
+
+	// === RETURN RESULT ===
+	if(_result!=ESP_OK) {
+		printf("#max31865_readCFG error\r\n");
+	}
+
+	return *(uint32_t*)_spi_transaction2.rx_data;
+}
+
 void max31865_writeCFG() {
 	// == SET UP STUFF ===
 	esp_err_t _result;
@@ -132,6 +166,24 @@ void max31865_writeCFG() {
 }
 
 
+static float a = 0.00390830;
+static float b = -0.0000005775;
+static float c = -0.00000000000418301;
+float Reference_Resistor = 4300.;           // Reference Resistor installed on the board.
+float RTD_Resistance = 1000.;				// PT1000 has 1kOhm @ 0deg celsius
+float calculate_temp(uint32_t rtd)
+{
+	// Hani conversion
+	float RTD = (float) rtd;
+	float R = (RTD * Reference_Resistor) / 32768; // Conversion of ADC RTD code to resistance
+	float Temp = -RTD_Resistance * a
+			+ sqrt(
+					RTD_Resistance * RTD_Resistance * a * a
+							- 4 * RTD_Resistance * b * (RTD_Resistance - R)); //Conversion of RTD resistance to Temperature
+	Temp = Temp / (2 * RTD_Resistance * b);
+	return Temp;
+}
+
 void blink_task(void *pvParameter)
 {
     /* BLINK */
@@ -143,48 +195,53 @@ void blink_task(void *pvParameter)
     gpio_pad_select_gpio(SPI_MASTER_RDY);
     gpio_set_direction(SPI_MASTER_RDY, GPIO_MODE_INPUT);
 
-
+    printf("Writing MAX31865 Config...\r\n");
+	max31865_writeCFG();						// continuous mode.
+	printf("...done.\r\n");
+	vTaskDelay(1000 / portTICK_PERIOD_MS);
 
     while(1) {
     	printf("--> RUN#: %d\r\n", cntr++);
 
-        /* Blink off (output low) */
         gpio_set_level(BLINK_GPIO, 0);
         vTaskDelay(500 / portTICK_PERIOD_MS);
-        /* Blink on (output high) */
         gpio_set_level(BLINK_GPIO, 1);
         vTaskDelay(500 / portTICK_PERIOD_MS);
 
+        // MAX31865
+        uint32_t _rtd = max31865_readRTD();
+        if (_rtd & 0x00000001) {
+        	SSD1306_GotoXY(10, 10);
+        	SSD1306_Puts("T=ERROR", &Font_7x10, SSD1306_COLOR_WHITE);
 
+        	printf("ERROR\r\n");
+        } else {
+        	uint32_t rtd = _rtd >> 1;
+        	float calculated_temp = calculate_temp(rtd);
+        	printf("OK. RTD= %d, temp: %.1f\r\n", rtd, calculated_temp);
 
-        if(cntr%10==0) {
-        	printf("Writing MAX31865 Config...\r\n");
-			max31865_writeCFG();
-			printf("...done.\r\n");
-			vTaskDelay(1000 / portTICK_PERIOD_MS);
+        	sprintf(buf, "T=%.1f degC", calculated_temp);
+        	SSD1306_GotoXY(20, 20);
+			SSD1306_Puts(buf, &Font_7x10, SSD1306_COLOR_WHITE);
         }
-        uint32_t cfg = max31865_readCFG();
-		printf("CFG: 0x%016x\r\n", cfg);
+        SSD1306_UpdateScreen();
     }
 }
 
 void app_main()
 {
 	// === I2C ===
-	printf("#1.1\r\n");
 	i2c_example_master_init();
 
-	printf("#1.2\r\n");
+	// === SSD1306 Display ===
 	SSD1306_Init();
 	SSD1306_Fill(SSD1306_COLOR_BLACK); // clear screen
 	SSD1306_GotoXY(3, 3);
-	SSD1306_Puts("BIER!", &Font_7x10, SSD1306_COLOR_WHITE);
+	SSD1306_Puts("B04rdBr4T", &Font_7x10, SSD1306_COLOR_WHITE);
 	SSD1306_UpdateScreen();
 
 	// === SPI ===
-	printf("#2\r\n");
 	spi_master_init();
-	printf("#3\r\n");
 
     xTaskCreate(&blink_task, "blink_task", configMINIMAL_STACK_SIZE, NULL, 5, NULL);
 
