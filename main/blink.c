@@ -211,7 +211,7 @@ void blink_task(void *pvParameter)
         // MAX31865
         uint32_t _rtd = max31865_readRTD();
         if (_rtd & 0x00000001) {
-        	SSD1306_GotoXY(10, 10);
+        	SSD1306_GotoXY(4, 20);
         	SSD1306_Puts("T=ERROR", &Font_7x10, SSD1306_COLOR_WHITE);
 
         	printf("ERROR\r\n");
@@ -221,7 +221,7 @@ void blink_task(void *pvParameter)
         	printf("OK. RTD= %d, temp: %.1f\r\n", rtd, calculated_temp);
 
         	sprintf(buf, "T=%.1f degC", calculated_temp);
-        	SSD1306_GotoXY(20, 20);
+        	SSD1306_GotoXY(4, 20);
 			SSD1306_Puts(buf, &Font_7x10, SSD1306_COLOR_WHITE);
         }
         SSD1306_UpdateScreen();
@@ -236,8 +236,8 @@ void app_main()
 	// === SSD1306 Display ===
 	SSD1306_Init();
 	SSD1306_Fill(SSD1306_COLOR_BLACK); // clear screen
-	SSD1306_GotoXY(3, 3);
-	SSD1306_Puts("B04rdBr4T", &Font_7x10, SSD1306_COLOR_WHITE);
+	SSD1306_GotoXY(4, 4);
+	SSD1306_Puts("B04rdBr4T!", &Font_11x18, SSD1306_COLOR_WHITE);
 	SSD1306_UpdateScreen();
 
 	// === SPI ===
