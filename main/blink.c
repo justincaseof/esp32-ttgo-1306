@@ -19,6 +19,8 @@
 
 #define BLINK_GPIO 16
 
+#define TEMPERATURE_DESIRED		30	// celsius
+
 /* according to "esp_wroom_32_datasheet_en.pdf" */
 #define I2C_EXAMPLE_MASTER_PORT 			I2C_NUM_1
 #define I2C_EXAMPLE_MASTER_SCL_IO    		4    		/*!< gpio number for I2C master clock */
@@ -34,10 +36,21 @@
 #define SPI_MASTER_CS			GPIO_NUM_15
 #define SPI_MASTER_RDY			17
 
-uint8_t cntr = 0;
+/* typedefs, structs, ... */
+typedef enum {
+	OFF,
+	ON,
+	BLINK_SLOW,
+	BLINK_FAST
+} led_blink_mode_t;
+
+/* internal vars */
+volatile uint32_t 			temperatureCheck_tick_counter = 0;
+volatile led_blink_mode_t 	led_blinkmode = OFF;
 spi_device_handle_t spi;
-uint8_t max31865_data[16];
-char buf[64];
+uint8_t 			max31865_data[16];
+char 				buf[64];
+volatile portMUX_TYPE 		myMutex = portMUX_INITIALIZER_UNLOCKED;
 
 static void i2c_example_master_init()
 {
@@ -124,13 +137,13 @@ uint32_t max31865_readRTD() {
 	// === TRANSMIT ===
 	_spi_transaction1.length = 		8 * 1;                     		// len is in BITS
 	_spi_transaction1.flags = 		SPI_TRANS_USE_TXDATA;			// use internal 4 byte buf
-	_spi_transaction1.tx_data[0] = 	0x01;							// start at address 0x00
+	_spi_transaction1.tx_data[0] = 	0x01;							// start at address of RTD
 
 	_result = spi_device_transmit(spi, &_spi_transaction1);  		// Transmit!
 	assert( _result == ESP_OK );            						// Should have had no issues.
 
 	// === RECEIVE ===
-	_spi_transaction2.length = 		8 * 2;								// number of bytes that we intent to receive
+	_spi_transaction2.length = 		8 * 2;							// number of bytes that we intent to receive
 	_spi_transaction2.flags = SPI_TRANS_USE_RXDATA;
 
 	_result = spi_device_transmit(spi, &_spi_transaction2);
@@ -144,27 +157,53 @@ uint32_t max31865_readRTD() {
 	return *(uint32_t*)_spi_transaction2.rx_data;
 }
 
-void max31865_writeCFG() {
+esp_err_t max31865_writeCFG() {
+printf("#DEBUG 0\r\n");
 	// == SET UP STUFF ===
 	esp_err_t _result;
+printf("#DEBUG 1\r\n");
 	spi_transaction_t _spi_transaction1;
+printf("#DEBUG 2\r\n");
 	memset(&_spi_transaction1, 0, sizeof(_spi_transaction1));		// init with zeros
+printf("#DEBUG 3\r\n");
 
 	// === TRANSMIT ===
 	_spi_transaction1.length = 		8 * 2;                     		// Command is 8 bits. len is in BITS
 	_spi_transaction1.flags = 		SPI_TRANS_USE_TXDATA;			// use internal 4 byte buf
-	_spi_transaction1.tx_data[0] = 	0x80;							// register address
-	_spi_transaction1.tx_data[1] = 	0xC3;							// data
+	_spi_transaction1.tx_data[0] = 	0x80;							// register address: write config
+	_spi_transaction1.tx_data[1] = 	0xC3;							// data: bias, continuous mode, clear errors,
 
+printf("#DEBUG 3\r\n");
 	_result = spi_device_transmit(spi, &_spi_transaction1);  		// Transmit!
-	assert( _result == ESP_OK );            						// Should have had no issues.
+printf("#DEBUG 4\r\n");
+	assert( _result == ESP_OK );           							// Should have had no issues.
 
 	// DEBUG
 	if(_result != ESP_OK) {
 		printf("#max31865_writeCFG error\r\n");
 	}
+	return _result;
 }
 
+uint32_t lastChangeAt = -1;
+void handleTemperature(float temperature) {
+	if (temperature < TEMPERATURE_DESIRED) {
+		if (lastChangeAt < 0 || temperatureCheck_tick_counter - lastChangeAt > 5) {
+			// SWITCH ON
+			printf("ON\r\n");
+			led_blinkmode = BLINK_FAST;
+			lastChangeAt = temperatureCheck_tick_counter;
+		} else {
+			// no switching, yet. avoid constant relais toggle
+		}
+	} else {
+		printf("OFF\r\n");
+		led_blinkmode = BLINK_SLOW;
+	}
+
+	// === finally, increase "TICK COUNTER"
+	++temperatureCheck_tick_counter;
+}
 
 static float a = 0.00390830;
 static float b = -0.0000005775;
@@ -186,46 +225,83 @@ float calculate_temp(uint32_t rtd)
 
 void blink_task(void *pvParameter)
 {
+
+
     /* BLINK */
     gpio_pad_select_gpio(BLINK_GPIO);
     /* Set the GPIO as a push/pull output */
     gpio_set_direction(BLINK_GPIO, GPIO_MODE_OUTPUT);
 
-    /* MAX31865 'ready' indication */
-    gpio_pad_select_gpio(SPI_MASTER_RDY);
-    gpio_set_direction(SPI_MASTER_RDY, GPIO_MODE_INPUT);
+    while(1) {
+    	taskENTER_CRITICAL(&myMutex);
 
-    printf("Writing MAX31865 Config...\r\n");
-	max31865_writeCFG();						// continuous mode.
+    	printf("#2\r\n");
+    	switch(led_blinkmode) {
+    	case OFF:
+    		gpio_set_level(BLINK_GPIO, 0);
+    		vTaskDelay(1000 / portTICK_PERIOD_MS);	// delay in this mode, too.
+    		break;
+    	case ON:
+    		gpio_set_level(BLINK_GPIO, 1);
+    		vTaskDelay(1000 / portTICK_PERIOD_MS);	// delay in this mode, too.
+    	   	break;
+    	case BLINK_SLOW:
+    		gpio_set_level(BLINK_GPIO, 0);
+			vTaskDelay(500 / portTICK_PERIOD_MS);
+			gpio_set_level(BLINK_GPIO, 1);
+			vTaskDelay(500 / portTICK_PERIOD_MS);
+    	    break;
+    	case BLINK_FAST:
+    		gpio_set_level(BLINK_GPIO, 0);
+			vTaskDelay(100 / portTICK_PERIOD_MS);
+			gpio_set_level(BLINK_GPIO, 1);
+			vTaskDelay(100 / portTICK_PERIOD_MS);
+			break;
+    	default:
+    		// ???
+    	    break;
+    	}
+
+    	taskEXIT_CRITICAL(&myMutex);
+    }
+}
+
+void temperature_check_task(void *pvParameter)
+{
+	esp_err_t init_done = 0;
+
+	printf("Writing MAX31865 Config...\r\n");
+	init_done = max31865_writeCFG();						// continuous mode.
 	printf("...done.\r\n");
-	vTaskDelay(1000 / portTICK_PERIOD_MS);
 
     while(1) {
-    	printf("--> RUN#: %d\r\n", cntr++);
+    	printf("#1\r\n");
+    	vTaskDelay(1000 / portTICK_PERIOD_MS);
 
-        gpio_set_level(BLINK_GPIO, 0);
-        vTaskDelay(500 / portTICK_PERIOD_MS);
-        gpio_set_level(BLINK_GPIO, 1);
-        vTaskDelay(500 / portTICK_PERIOD_MS);
+		// MAX31865
+		uint32_t _rtd = max31865_readRTD();
+		if (_rtd & 0x00000001) {
+			SSD1306_GotoXY(4, 20);
+			SSD1306_Puts("T=ERROR", &Font_7x10, SSD1306_COLOR_WHITE);
 
-        // MAX31865
-        uint32_t _rtd = max31865_readRTD();
-        if (_rtd & 0x00000001) {
-        	SSD1306_GotoXY(4, 20);
-        	SSD1306_Puts("T=ERROR", &Font_7x10, SSD1306_COLOR_WHITE);
+			printf("ERROR\r\n");
+		} else {
+			uint32_t rtd = _rtd >> 1;
+			float calculated_temp = calculate_temp(rtd);
+			printf("OK. RTD= %d, temp: %.1f\r\n", rtd, calculated_temp);
 
-        	printf("ERROR\r\n");
-        } else {
-        	uint32_t rtd = _rtd >> 1;
-        	float calculated_temp = calculate_temp(rtd);
-        	printf("OK. RTD= %d, temp: %.1f\r\n", rtd, calculated_temp);
-
-        	sprintf(buf, "T=%.1f degC", calculated_temp);
-        	SSD1306_GotoXY(4, 20);
+			sprintf(buf, "T=%.1f degC", calculated_temp);
+			SSD1306_GotoXY(4, 20);
 			SSD1306_Puts(buf, &Font_7x10, SSD1306_COLOR_WHITE);
-        }
-        SSD1306_UpdateScreen();
-    }
+
+			handleTemperature(calculated_temp);
+
+			sprintf(buf, "led=%d", led_blinkmode);
+			SSD1306_GotoXY(4, 35);
+			SSD1306_Puts(buf, &Font_7x10, SSD1306_COLOR_WHITE);
+		}
+		SSD1306_UpdateScreen();
+	}
 }
 
 void app_main()
@@ -242,7 +318,12 @@ void app_main()
 
 	// === SPI ===
 	spi_master_init();
+	// MAX 31865 'ready' indication
+	gpio_pad_select_gpio(SPI_MASTER_RDY);
+	gpio_set_direction(SPI_MASTER_RDY, GPIO_MODE_INPUT);
 
-    xTaskCreate(&blink_task, "blink_task", configMINIMAL_STACK_SIZE, NULL, 5, NULL);
+    // === TASKS ===
+	xTaskCreate(&blink_task, "blink_task", 							CONFIG_FREERTOS_IDLE_TASK_STACKSIZE, NULL, tskIDLE_PRIORITY +1, NULL);
+    xTaskCreate(&temperature_check_task, "temperature_check_task", 	CONFIG_FREERTOS_IDLE_TASK_STACKSIZE * 4, NULL, tskIDLE_PRIORITY, NULL);
 
 }
