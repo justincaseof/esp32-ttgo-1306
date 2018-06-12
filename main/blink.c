@@ -17,7 +17,7 @@
 
 #include "ssd1306.h"
 
-#define BLINK_GPIO 16
+#define BLINK_GPIO 				GPIO_NUM_16
 
 #define TEMPERATURE_DESIRED		30	// celsius
 
@@ -25,8 +25,8 @@
 #define I2C_EXAMPLE_MASTER_PORT 			I2C_NUM_1
 #define I2C_EXAMPLE_MASTER_SCL_IO    		4    		/*!< gpio number for I2C master clock */
 #define I2C_EXAMPLE_MASTER_SDA_IO    		5    		/*!< gpio number for I2C master data  */
-#define I2C_EXAMPLE_MASTER_TX_BUF_DISABLE   0   		/*!< I2C master do not need buffer */
-#define I2C_EXAMPLE_MASTER_RX_BUF_DISABLE   0   		/*!< I2C master do not need buffer */
+#define I2C_EXAMPLE_MASTER_TX_BUF_DISABLE   0   		/*!< I2C master does not need buffer */
+#define I2C_EXAMPLE_MASTER_RX_BUF_DISABLE   0   		/*!< I2C master does not need buffer */
 #define I2C_EXAMPLE_MASTER_FREQ_HZ    		100000     	/*!< I2C master clock frequency */
 
 /* We are using HSPI */
@@ -34,7 +34,7 @@
 #define SPI_MASTER_MOSI_SDI		GPIO_NUM_13
 #define SPI_MASTER_CLK			GPIO_NUM_14
 #define SPI_MASTER_CS			GPIO_NUM_15
-#define SPI_MASTER_RDY			17
+#define SPI_MASTER_RDY			GPIO_NUM_17
 
 /* typedefs, structs, ... */
 typedef enum {
@@ -45,12 +45,12 @@ typedef enum {
 } led_blink_mode_t;
 
 /* internal vars */
-volatile uint32_t 			temperatureCheck_tick_counter = 0;
-volatile led_blink_mode_t 	led_blinkmode = OFF;
-spi_device_handle_t spi;
-uint8_t 			max31865_data[16];
-char 				buf[64];
-volatile portMUX_TYPE 		myMutex = portMUX_INITIALIZER_UNLOCKED;
+static uint32_t 			temperatureCheck_tick_counter = 0;
+static led_blink_mode_t 	led_blinkmode = OFF;
+static portMUX_TYPE 		myMutex = portMUX_INITIALIZER_UNLOCKED;
+spi_device_handle_t 		spi;
+uint8_t 					max31865_data[16];
+char 						buf[64];
 
 static void i2c_example_master_init()
 {
@@ -158,14 +158,10 @@ uint32_t max31865_readRTD() {
 }
 
 esp_err_t max31865_writeCFG() {
-printf("#DEBUG 0\r\n");
 	// == SET UP STUFF ===
 	esp_err_t _result;
-printf("#DEBUG 1\r\n");
 	spi_transaction_t _spi_transaction1;
-printf("#DEBUG 2\r\n");
 	memset(&_spi_transaction1, 0, sizeof(_spi_transaction1));		// init with zeros
-printf("#DEBUG 3\r\n");
 
 	// === TRANSMIT ===
 	_spi_transaction1.length = 		8 * 2;                     		// Command is 8 bits. len is in BITS
@@ -173,9 +169,7 @@ printf("#DEBUG 3\r\n");
 	_spi_transaction1.tx_data[0] = 	0x80;							// register address: write config
 	_spi_transaction1.tx_data[1] = 	0xC3;							// data: bias, continuous mode, clear errors,
 
-printf("#DEBUG 3\r\n");
 	_result = spi_device_transmit(spi, &_spi_transaction1);  		// Transmit!
-printf("#DEBUG 4\r\n");
 	assert( _result == ESP_OK );           							// Should have had no issues.
 
 	// DEBUG
@@ -188,7 +182,7 @@ printf("#DEBUG 4\r\n");
 uint32_t lastChangeAt = -1;
 void handleTemperature(float temperature) {
 	if (temperature < TEMPERATURE_DESIRED) {
-		if (lastChangeAt < 0 || temperatureCheck_tick_counter - lastChangeAt > 5) {
+		if (lastChangeAt == -1 || temperatureCheck_tick_counter - lastChangeAt > 5) {
 			// SWITCH ON
 			printf("ON\r\n");
 			led_blinkmode = BLINK_FAST;
@@ -225,17 +219,9 @@ float calculate_temp(uint32_t rtd)
 
 void blink_task(void *pvParameter)
 {
-
-
-    /* BLINK */
-    gpio_pad_select_gpio(BLINK_GPIO);
-    /* Set the GPIO as a push/pull output */
-    gpio_set_direction(BLINK_GPIO, GPIO_MODE_OUTPUT);
-
     while(1) {
     	taskENTER_CRITICAL(&myMutex);
 
-    	printf("#2\r\n");
     	switch(led_blinkmode) {
     	case OFF:
     		gpio_set_level(BLINK_GPIO, 0);
@@ -258,7 +244,8 @@ void blink_task(void *pvParameter)
 			vTaskDelay(100 / portTICK_PERIOD_MS);
 			break;
     	default:
-    		// ???
+    		printf("#unknown state\r\n");
+    		vTaskDelay(1000 / portTICK_PERIOD_MS);
     	    break;
     	}
 
@@ -268,14 +255,12 @@ void blink_task(void *pvParameter)
 
 void temperature_check_task(void *pvParameter)
 {
-	esp_err_t init_done = 0;
-
 	printf("Writing MAX31865 Config...\r\n");
-	init_done = max31865_writeCFG();						// continuous mode.
+	max31865_writeCFG();						// continuous mode.
 	printf("...done.\r\n");
 
     while(1) {
-    	printf("#1\r\n");
+    	printf("#temperature_check_task::tick()\r\n");
     	vTaskDelay(1000 / portTICK_PERIOD_MS);
 
 		// MAX31865
@@ -306,6 +291,10 @@ void temperature_check_task(void *pvParameter)
 
 void app_main()
 {
+	// === BLINK LED ===
+	gpio_pad_select_gpio(BLINK_GPIO);
+	gpio_set_direction(BLINK_GPIO, GPIO_MODE_OUTPUT);
+
 	// === I2C ===
 	i2c_example_master_init();
 
@@ -323,7 +312,7 @@ void app_main()
 	gpio_set_direction(SPI_MASTER_RDY, GPIO_MODE_INPUT);
 
     // === TASKS ===
-	xTaskCreate(&blink_task, "blink_task", 							CONFIG_FREERTOS_IDLE_TASK_STACKSIZE, NULL, tskIDLE_PRIORITY +1, NULL);
-    xTaskCreate(&temperature_check_task, "temperature_check_task", 	CONFIG_FREERTOS_IDLE_TASK_STACKSIZE * 4, NULL, tskIDLE_PRIORITY, NULL);
+	xTaskCreate(&blink_task, "blink_task", 							CONFIG_FREERTOS_IDLE_TASK_STACKSIZE * 8, NULL, tskIDLE_PRIORITY, NULL);
+    xTaskCreate(&temperature_check_task, "temperature_check_task", 	CONFIG_FREERTOS_IDLE_TASK_STACKSIZE * 8, NULL, tskIDLE_PRIORITY, NULL);
 
 }
