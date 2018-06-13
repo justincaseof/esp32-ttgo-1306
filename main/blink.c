@@ -18,6 +18,7 @@
 #include "ssd1306.h"
 
 #define BLINK_GPIO 				GPIO_NUM_16
+#define RELAIS_GPIO 			GPIO_NUM_22
 
 #define TEMPERATURE_DESIRED		30	// celsius
 
@@ -42,12 +43,14 @@ typedef enum {
 	ON,
 	BLINK_SLOW,
 	BLINK_FAST
-} led_blink_mode_t;
+} gpio_output_mode_t;
 
 /* internal vars */
+const TickType_t 			xDelay = 100 / portTICK_PERIOD_MS;
 static uint32_t 			temperatureCheck_tick_counter = 0;
-static led_blink_mode_t 	led_blinkmode = OFF;
-static portMUX_TYPE 		myMutex = portMUX_INITIALIZER_UNLOCKED;
+static gpio_output_mode_t 	led_blinkmode = OFF;
+static gpio_output_mode_t 	relais_mode = OFF;
+//static portMUX_TYPE 		myMutex = portMUX_INITIALIZER_UNLOCKED;
 spi_device_handle_t 		spi;
 uint8_t 					max31865_data[16];
 char 						buf[64];
@@ -186,6 +189,7 @@ void handleTemperature(float temperature) {
 			// SWITCH ON
 			printf("ON\r\n");
 			led_blinkmode = BLINK_FAST;
+			relais_mode = ON;
 			lastChangeAt = temperatureCheck_tick_counter;
 		} else {
 			// no switching, yet. avoid constant relais toggle
@@ -193,6 +197,7 @@ void handleTemperature(float temperature) {
 	} else {
 		printf("OFF\r\n");
 		led_blinkmode = BLINK_SLOW;
+		relais_mode = OFF;
 	}
 
 	// === finally, increase "TICK COUNTER"
@@ -219,37 +224,67 @@ float calculate_temp(uint32_t rtd)
 
 void blink_task(void *pvParameter)
 {
+	gpio_set_level(BLINK_GPIO, 0);
+	vTaskDelay(xDelay);
+	gpio_set_level(BLINK_GPIO, 1);
+	vTaskDelay(xDelay);
+	gpio_set_level(BLINK_GPIO, 0);
+	vTaskDelay(xDelay);
+	gpio_set_level(BLINK_GPIO, 1);
+	vTaskDelay(xDelay);
+	gpio_set_level(BLINK_GPIO, 0);
+	vTaskDelay(xDelay);
+	gpio_set_level(BLINK_GPIO, 1);
+	vTaskDelay(xDelay);
+
     while(1) {
-    	taskENTER_CRITICAL(&myMutex);
-
+    	printf("#blink_task::tick()\r\n");
+    	// === LED ===
     	switch(led_blinkmode) {
-    	case OFF:
-    		gpio_set_level(BLINK_GPIO, 0);
-    		vTaskDelay(1000 / portTICK_PERIOD_MS);	// delay in this mode, too.
-    		break;
-    	case ON:
-    		gpio_set_level(BLINK_GPIO, 1);
-    		vTaskDelay(1000 / portTICK_PERIOD_MS);	// delay in this mode, too.
-    	   	break;
-    	case BLINK_SLOW:
-    		gpio_set_level(BLINK_GPIO, 0);
-			vTaskDelay(500 / portTICK_PERIOD_MS);
-			gpio_set_level(BLINK_GPIO, 1);
-			vTaskDelay(500 / portTICK_PERIOD_MS);
-    	    break;
-    	case BLINK_FAST:
-    		gpio_set_level(BLINK_GPIO, 0);
-			vTaskDelay(100 / portTICK_PERIOD_MS);
-			gpio_set_level(BLINK_GPIO, 1);
-			vTaskDelay(100 / portTICK_PERIOD_MS);
+		case OFF:
+			gpio_set_level(BLINK_GPIO, 0);
+			vTaskDelay(1000 / portTICK_PERIOD_MS);	// delay in this mode, too.
 			break;
-    	default:
-    		printf("#unknown state\r\n");
-    		vTaskDelay(1000 / portTICK_PERIOD_MS);
-    	    break;
-    	}
+		case ON:
+			gpio_set_level(BLINK_GPIO, 1);
+			vTaskDelay(1000 / portTICK_PERIOD_MS);	// delay in this mode, too.
+			break;
+		case BLINK_SLOW:
+			gpio_set_level(BLINK_GPIO, 0);
+			vTaskDelay(600 / portTICK_PERIOD_MS);
+			gpio_set_level(BLINK_GPIO, 1);
+			vTaskDelay(600 / portTICK_PERIOD_MS);
+			break;
+		case BLINK_FAST:
+			gpio_set_level(BLINK_GPIO, 0);
+			vTaskDelay( xDelay );
+			gpio_set_level(BLINK_GPIO, 1);
+			vTaskDelay( xDelay );
+			break;
+		default:
+			printf("#unknown state\r\n");
+			vTaskDelay(1000 / portTICK_PERIOD_MS);
+			break;
+		}
+    }
+}
 
-    	taskEXIT_CRITICAL(&myMutex);
+void relais_task(void *pvParameter)
+{
+	gpio_set_level(RELAIS_GPIO, 0);
+
+    while(1) {
+    	printf("#relais_task::tick()\r\n");
+    	vTaskDelay(1000 / portTICK_PERIOD_MS);	// delay in this mode, too.
+    	// === RELAIS ===
+    	switch(relais_mode) {
+		case ON:
+			gpio_set_level(RELAIS_GPIO, 1);
+			break;
+		default:
+			gpio_set_level(RELAIS_GPIO, 0);
+			break;
+		}
     }
 }
 
@@ -260,8 +295,8 @@ void temperature_check_task(void *pvParameter)
 	printf("...done.\r\n");
 
     while(1) {
-    	printf("#temperature_check_task::tick()\r\n");
-    	vTaskDelay(1000 / portTICK_PERIOD_MS);
+		printf("#temperature_check_task::tick()\r\n");
+		vTaskDelay(1000 / portTICK_PERIOD_MS);
 
 		// MAX31865
 		uint32_t _rtd = max31865_readRTD();
@@ -284,16 +319,25 @@ void temperature_check_task(void *pvParameter)
 			sprintf(buf, "led=%d", led_blinkmode);
 			SSD1306_GotoXY(4, 35);
 			SSD1306_Puts(buf, &Font_7x10, SSD1306_COLOR_WHITE);
+
+			sprintf(buf, "relais=%d", relais_mode);
+			SSD1306_GotoXY(4, 47);
+			SSD1306_Puts(buf, &Font_7x10, SSD1306_COLOR_WHITE);
 		}
 		SSD1306_UpdateScreen();
-	}
+    }
 }
 
 void app_main()
 {
-	// === BLINK LED ===
+	// === I/O ===
 	gpio_pad_select_gpio(BLINK_GPIO);
 	gpio_set_direction(BLINK_GPIO, GPIO_MODE_OUTPUT);
+	gpio_set_level(BLINK_GPIO, 0);
+
+	gpio_pad_select_gpio(RELAIS_GPIO);
+	gpio_set_direction(RELAIS_GPIO, GPIO_MODE_OUTPUT);
+	gpio_set_level(RELAIS_GPIO, 0);
 
 	// === I2C ===
 	i2c_example_master_init();
@@ -312,7 +356,11 @@ void app_main()
 	gpio_set_direction(SPI_MASTER_RDY, GPIO_MODE_INPUT);
 
     // === TASKS ===
-	xTaskCreate(&blink_task, "blink_task", 							CONFIG_FREERTOS_IDLE_TASK_STACKSIZE * 8, NULL, tskIDLE_PRIORITY, NULL);
-    xTaskCreate(&temperature_check_task, "temperature_check_task", 	CONFIG_FREERTOS_IDLE_TASK_STACKSIZE * 8, NULL, tskIDLE_PRIORITY, NULL);
+	TaskHandle_t* p_blinkTask = malloc(sizeof(TaskHandle_t));
+	TaskHandle_t* p_relaisTask = malloc(sizeof(TaskHandle_t));
+	TaskHandle_t* p_tempCheckTask = malloc(sizeof(TaskHandle_t));
+	xTaskCreate(&blink_task, "blink_task", CONFIG_FREERTOS_IDLE_TASK_STACKSIZE * 8, NULL, tskIDLE_PRIORITY, p_blinkTask);
+	xTaskCreate(&relais_task, "relais_task", CONFIG_FREERTOS_IDLE_TASK_STACKSIZE * 8, NULL, tskIDLE_PRIORITY, p_relaisTask);
+	xTaskCreate(&temperature_check_task, "tempChkTask", 	CONFIG_FREERTOS_IDLE_TASK_STACKSIZE * 8, NULL, tskIDLE_PRIORITY, p_tempCheckTask);
 
 }
