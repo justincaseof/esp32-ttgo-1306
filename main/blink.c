@@ -20,7 +20,7 @@
 #define BLINK_GPIO 				GPIO_NUM_16
 #define RELAIS_GPIO 			GPIO_NUM_22
 
-#define TEMPERATURE_DESIRED		30	// celsius
+#define TEMPERATURE_DESIRED		270	// celsius
 
 /* according to "esp_wroom_32_datasheet_en.pdf" */
 #define I2C_EXAMPLE_MASTER_PORT 			I2C_NUM_1
@@ -307,19 +307,24 @@ void temperature_check_task(void *pvParameter)
 			printf("ERROR\r\n");
 		} else {
 			uint32_t rtd = _rtd >> 1;
-			float calculated_temp = calculate_temp(rtd);
-			printf("OK. RTD= %d, temp: %.1f\r\n", rtd, calculated_temp);
 
-			sprintf(buf, "T=%.1f degC", calculated_temp);
+			////////////////////////////// V3 :: WORKING!
+			float calculated_temp_2 = calculate_temp(rtd);
+			printf("OK. RTD= %d, temp: %.1f\r\n", rtd, calculated_temp_2);
+
+			// OUTPUT :: LINE 1
+			sprintf(buf, "TdegC: %.0f", calculated_temp_2);
 			SSD1306_GotoXY(4, 20);
 			SSD1306_Puts(buf, &Font_7x10, SSD1306_COLOR_WHITE);
 
-			handleTemperature(calculated_temp);
+			handleTemperature(calculated_temp_2);
 
+			// OUTPUT :: LINE 2
 			sprintf(buf, "led=%d", led_blinkmode);
 			SSD1306_GotoXY(4, 35);
 			SSD1306_Puts(buf, &Font_7x10, SSD1306_COLOR_WHITE);
 
+//			// OUTPUT :: LINE 3
 			sprintf(buf, "relais=%d", relais_mode);
 			SSD1306_GotoXY(4, 47);
 			SSD1306_Puts(buf, &Font_7x10, SSD1306_COLOR_WHITE);
