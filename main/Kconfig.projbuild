@@ -13,7 +13,7 @@ config BLINK_GPIO
 		
 choice ESP_WIFI_MODE
     prompt "AP or STA"
-    default ESP_WIFI_IS_STATION
+    default ESP_WIFI_IS_SOFTAP
     help
         Whether the esp32 is softAP or station.
 

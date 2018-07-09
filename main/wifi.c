@@ -6,16 +6,6 @@
  */
 #include "wifi.h"
 
-/* The examples use simple WiFi configuration that you can set via
- 'make menuconfig'.
- If you'd rather not, just change the below entries to strings with
- the config you want - ie #define EXAMPLE_WIFI_SSID "mywifissid"
- */
-#define EXAMPLE_ESP_WIFI_MODE_AP   CONFIG_ESP_WIFI_MODE_AP //TRUE:AP FALSE:STA
-#define EXAMPLE_ESP_WIFI_SSID      CONFIG_ESP_WIFI_SSID
-#define EXAMPLE_ESP_WIFI_PASS      CONFIG_ESP_WIFI_PASSWORD
-#define EXAMPLE_MAX_STA_CONN       CONFIG_MAX_STA_CONN
-
 /* FreeRTOS event group to signal when we are connected*/
 static EventGroupHandle_t wifi_event_group;
 
@@ -80,7 +70,13 @@ void wifi_init_softap() {
 	ESP_ERROR_CHECK(esp_wifi_set_config(ESP_IF_WIFI_AP, &wifi_config));
 	ESP_ERROR_CHECK(esp_wifi_start());
 
-	ESP_LOGI(LOGTAG, "wifi_init_softap finished.SSID:%s password:%s", EXAMPLE_ESP_WIFI_SSID, EXAMPLE_ESP_WIFI_PASS);
+	ESP_LOGI(LOGTAG, "wifi_init_softap finished. SSID:%s password:%s", EXAMPLE_ESP_WIFI_SSID, EXAMPLE_ESP_WIFI_PASS);
+
+	tcpip_adapter_ip_info_t ap_ip;
+	tcpip_adapter_get_ip_info(TCPIP_ADAPTER_IF_AP, &ap_ip);
+	ESP_LOGI( LOGTAG, "Network info:");
+	ESP_LOGI( LOGTAG, "\t-->IP: "IPSTR, IP2STR(&(ap_ip.ip)));
+	ESP_LOGI( LOGTAG, "\t-->GW: "IPSTR, IP2STR(&(ap_ip.gw)));
 }
 
 void wifi_init_sta() {
@@ -104,5 +100,11 @@ void wifi_init_sta() {
 
 	ESP_LOGI(LOGTAG, "wifi_init_sta finished.");
 	ESP_LOGI(LOGTAG, "connect to ap SSID:%s password:%s", EXAMPLE_ESP_WIFI_SSID, EXAMPLE_ESP_WIFI_PASS);
+
+	tcpip_adapter_ip_info_t ap_ip;
+	tcpip_adapter_get_ip_info(TCPIP_ADAPTER_IF_AP, &ap_ip);
+	ESP_LOGI( LOGTAG, "Network info:");
+	ESP_LOGI( LOGTAG, "\t-->IP: "IPSTR, IP2STR(&(ap_ip.ip)));
+	ESP_LOGI( LOGTAG, "\t-->GW: "IPSTR, IP2STR(&(ap_ip.gw)));
 }
 

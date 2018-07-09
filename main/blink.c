@@ -18,7 +18,9 @@
 
 #include "ssd1306.h"
 
+#include "my_lwip.h"
 #include "wifi.h"
+
 
 #define BLINK_GPIO 				GPIO_NUM_16
 #define RELAIS_GPIO 			GPIO_NUM_22
@@ -243,7 +245,7 @@ void blink_task(void *pvParameter)
 	vTaskDelay(xDelay);
 
     while(1) {
-    	printf("#blink_task::tick()\r\n");
+    	//printf("#blink_task::tick()\r\n");
     	// === LED ===
     	switch(led_blinkmode) {
 		case OFF:
@@ -279,7 +281,7 @@ void relais_task(void *pvParameter)
 	gpio_set_level(RELAIS_GPIO, 0);
 
     while(1) {
-    	printf("#relais_task::tick()\r\n");
+    	//printf("#relais_task::tick()\r\n");
     	vTaskDelay(1000 / portTICK_PERIOD_MS);	// delay in this mode, too.
     	// === RELAIS ===
     	switch(relais_mode) {
@@ -300,7 +302,7 @@ void temperature_check_task(void *pvParameter)
 	printf("...done.\r\n");
 
     while(1) {
-		printf("#temperature_check_task::tick()\r\n");
+		//printf("#temperature_check_task::tick()\r\n");
 		vTaskDelay(1000 / portTICK_PERIOD_MS);
 
 		// MAX31865
@@ -341,7 +343,13 @@ void temperature_check_task(void *pvParameter)
 
 void app_main()
 {
+	ESP_LOGI(LOGTAG, "#####################################");
+	ESP_LOGI(LOGTAG, "# BoardBrat");
+	ESP_LOGI(LOGTAG, "# v0");
+	ESP_LOGI(LOGTAG, "#####################################");
+
 	// === I/O ===
+	ESP_LOGI(LOGTAG, "* Setting up GPIO");
 	gpio_pad_select_gpio(BLINK_GPIO);
 	gpio_set_direction(BLINK_GPIO, GPIO_MODE_OUTPUT);
 	gpio_set_level(BLINK_GPIO, 0);
@@ -352,9 +360,11 @@ void app_main()
 
 
 	// === I2C ===
+	ESP_LOGI(LOGTAG, "* Setting up I2C");
 	i2c_example_master_init();
 
 	// === SSD1306 Display ===
+	ESP_LOGI(LOGTAG, "* Setting up SSD1306");
 	SSD1306_Init();
 	SSD1306_Fill(SSD1306_COLOR_BLACK); // clear screen
 	SSD1306_GotoXY(4, 4);
@@ -363,15 +373,15 @@ void app_main()
 
 
 	// === SPI ===
+	ESP_LOGI(LOGTAG, "* Setting up SPI and MAX31865");
 	spi_master_init();
 	// MAX 31865 'ready' indication
 	gpio_pad_select_gpio(SPI_MASTER_RDY);
 	gpio_set_direction(SPI_MASTER_RDY, GPIO_MODE_INPUT);
 
 
-	// === lwIP ===
-
-	// === WiFi ===
+	// === NVS ===
+	ESP_LOGI(LOGTAG, "* Setting up NVS");
 	//Initialize NVS
 	esp_err_t ret = nvs_flash_init();
 	if (ret == ESP_ERR_NVS_NO_FREE_PAGES) {
@@ -380,6 +390,14 @@ void app_main()
 	}
 	ESP_ERROR_CHECK(ret);
 
+
+	// === lwIP ===
+	ESP_LOGI(LOGTAG, "* Setting up IP");
+	init_ip_config();
+
+
+	// === WiFi ===
+	ESP_LOGI(LOGTAG, "* Setting up WiFi");
 #if EXAMPLE_ESP_WIFI_MODE_AP
 	ESP_LOGI(LOGTAG, "ESP_WIFI_MODE_AP");
 	wifi_init_softap();
@@ -390,6 +408,7 @@ void app_main()
 
 
     // === TASKS ===
+	ESP_LOGI(LOGTAG, "* Starting Tasks");
 	TaskHandle_t* p_blinkTask = malloc(sizeof(TaskHandle_t));
 	TaskHandle_t* p_relaisTask = malloc(sizeof(TaskHandle_t));
 	TaskHandle_t* p_tempCheckTask = malloc(sizeof(TaskHandle_t));
@@ -397,4 +416,5 @@ void app_main()
 	xTaskCreate(&relais_task, "relais_task", CONFIG_FREERTOS_IDLE_TASK_STACKSIZE * 8, NULL, tskIDLE_PRIORITY, p_relaisTask);
 	xTaskCreate(&temperature_check_task, "tempChkTask", 	CONFIG_FREERTOS_IDLE_TASK_STACKSIZE * 8, NULL, tskIDLE_PRIORITY, p_tempCheckTask);
 
+	ESP_LOGI(LOGTAG, "****** INIT DONE. ******");
 }
