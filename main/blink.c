@@ -14,8 +14,11 @@
 #include "sdkconfig.h"
 #include "fonts.h"
 #include "math.h"
+#include "esp_log.h"
 
 #include "ssd1306.h"
+
+#include "wifi.h"
 
 #define BLINK_GPIO 				GPIO_NUM_16
 #define RELAIS_GPIO 			GPIO_NUM_22
@@ -36,6 +39,8 @@
 #define SPI_MASTER_CLK			GPIO_NUM_14
 #define SPI_MASTER_CS			GPIO_NUM_15
 #define SPI_MASTER_RDY			GPIO_NUM_17
+
+static const char* LOGTAG = "BoardBrat";
 
 /* typedefs, structs, ... */
 typedef enum {
@@ -302,7 +307,7 @@ void temperature_check_task(void *pvParameter)
 		uint32_t _rtd = max31865_readRTD();
 		if (_rtd & 0x00000001) {
 			SSD1306_GotoXY(4, 20);
-			SSD1306_Puts("T=ERROR", &Font_7x10, SSD1306_COLOR_WHITE);
+			SSD1306_Puts("T=ERROR  ", &Font_7x10, SSD1306_COLOR_WHITE);
 
 			printf("ERROR\r\n");
 		} else {
@@ -313,25 +318,26 @@ void temperature_check_task(void *pvParameter)
 			printf("OK. RTD= %d, temp: %.1f\r\n", rtd, calculated_temp_2);
 
 			// OUTPUT :: LINE 1
-			sprintf(buf, "TdegC: %.0f", calculated_temp_2);
+			sprintf(buf, "TdegC: %.0f    ", calculated_temp_2);
 			SSD1306_GotoXY(4, 20);
 			SSD1306_Puts(buf, &Font_7x10, SSD1306_COLOR_WHITE);
 
 			handleTemperature(calculated_temp_2);
 
 			// OUTPUT :: LINE 2
-			sprintf(buf, "led=%d", led_blinkmode);
+			sprintf(buf, "led=%d    ", led_blinkmode);
 			SSD1306_GotoXY(4, 35);
 			SSD1306_Puts(buf, &Font_7x10, SSD1306_COLOR_WHITE);
 
 //			// OUTPUT :: LINE 3
-			sprintf(buf, "relais=%d", relais_mode);
+			sprintf(buf, "relais=%d   ", relais_mode);
 			SSD1306_GotoXY(4, 47);
 			SSD1306_Puts(buf, &Font_7x10, SSD1306_COLOR_WHITE);
 		}
 		SSD1306_UpdateScreen();
     }
 }
+
 
 void app_main()
 {
@@ -344,6 +350,7 @@ void app_main()
 	gpio_set_direction(RELAIS_GPIO, GPIO_MODE_OUTPUT);
 	gpio_set_level(RELAIS_GPIO, 0);
 
+
 	// === I2C ===
 	i2c_example_master_init();
 
@@ -354,11 +361,33 @@ void app_main()
 	SSD1306_Puts("B04rdBr4T!", &Font_11x18, SSD1306_COLOR_WHITE);
 	SSD1306_UpdateScreen();
 
+
 	// === SPI ===
 	spi_master_init();
 	// MAX 31865 'ready' indication
 	gpio_pad_select_gpio(SPI_MASTER_RDY);
 	gpio_set_direction(SPI_MASTER_RDY, GPIO_MODE_INPUT);
+
+
+	// === lwIP ===
+
+	// === WiFi ===
+	//Initialize NVS
+	esp_err_t ret = nvs_flash_init();
+	if (ret == ESP_ERR_NVS_NO_FREE_PAGES) {
+		ESP_ERROR_CHECK(nvs_flash_erase());
+		ret = nvs_flash_init();
+	}
+	ESP_ERROR_CHECK(ret);
+
+#if EXAMPLE_ESP_WIFI_MODE_AP
+	ESP_LOGI(LOGTAG, "ESP_WIFI_MODE_AP");
+	wifi_init_softap();
+#else
+	ESP_LOGI(LOGTAG, "ESP_WIFI_MODE_STA");
+	wifi_init_sta();
+#endif /*EXAMPLE_ESP_WIFI_MODE_AP*/
+
 
     // === TASKS ===
 	TaskHandle_t* p_blinkTask = malloc(sizeof(TaskHandle_t));
