@@ -1,5 +1,4 @@
 # Blink Example
 
-Starts a FreeRTOS task to blink an LED
+ * for ttgo esp32 wroom board with 18650 Battery and ssd1306 display 
 
-See the README.md file in the upper level 'examples' directory for more information about examples.
